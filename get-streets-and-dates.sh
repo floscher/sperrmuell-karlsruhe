@@ -18,45 +18,46 @@ echo 'PRODID:github.com/meyermarcel' >> $ICAL_FILE
 SERVER=$1
 URL="${SERVER}/service/abfall/akal/akal.php"
 
-FIRST_LETTER=A
-CALENDAR_EVENT_INDEX=0
+optionRegex='<option[^>]+value=([0-9]+)[^>]*>([^<]+)</option>'
+STREETS=`curl -g "$URL?von=A&bis=%5B"  2>/dev/null | grep -oE "$optionRegex" 2>/dev/null `
 
-for SECOND_LETTER in {{B..Z},'['} ; do
-    COUNT=$(($(curl -g "${URL}?von=${FIRST_LETTER}&bis=${SECOND_LETTER}" 2> /dev/null | grep -o 'option value=' | wc -l) + 1))
+echo "$(echo "$STREETS" | wc -l) Einträge geladen."
+echo "Extrahiere Straßennamen…"
 
-    printf "\nVerfügbare Straßen, die mit dem Buchstaben ${FIRST_LETTER} beginnen (Anzahl: ${COUNT}), werden geladen:\n"
+STREET_IDS=()
+STREET_NAMES=()
 
+while read -r street; do
+  STREET_IDS+=("$(echo $street | sed -r "s~$optionRegex~\1~")")
+  STREET_NAMES+=("$(echo $street | sed -r "s~$optionRegex~\2~")")
+  printf '∙'
+done <<< "$STREETS"
 
-    for ((i = 1; i <= $COUNT; i++)) ; do
-        HTML_STREET_DATE=$(curl -g --request POST "${URL}?von=${FIRST_LETTER}&bis=${SECOND_LETTER}" --data-urlencode "strasse=${i}&anzeigen=anzeigen" 2> /dev/null)
-        STREET=$(echo ${HTML_STREET_DATE} | ack -o "(?<=<H1 align=left><a href='/service/abfall/akal/akal\.php\?strasse=)[^'>]*")
-        DATE=$(echo ${HTML_STREET_DATE} | ack -o "(?<=Sperrmüllabholung<\/td><td valign=top><b>)[^ <]*")
+echo
+echo "${#STREET_NAMES[@]} Straßennamen extrahiert."
 
-        if [[ $DATE =~ [0-9]{2}\.[0-9]{2}\.[0-9]{4}$ ]]
-            then
+COUNTER=1
 
-            DAY=$(echo ${DATE} | cut -c1-2)
-            MONTH=$(echo ${DATE} | cut -c4-5)
-            YEAR=$(echo ${DATE} | cut -c7-10)
+for i in "${!STREET_IDS[@]}"; do
+  dateRegex="Sperrmüllabholung[[:space:]]*<\/td>[[:space:]]*<td valign=top>[[:space:]]*<b>[[:space:]]*([0-9]{2})\.([0-9]{2})\.([0-9]{4})"
+  dateMatch=`curl -g --request POST "$URL?von=A&bis=%5B" --data-urlencode "strasse=${STREET_IDS[$i]}&anzeigen=anzeigen" 2>/dev/null | grep -oE "$dateRegex"`
+  DATE=`echo "$dateMatch" | sed -r "s~$dateRegex~\3\2\1~"`
 
-        
-            echo 'BEGIN:VEVENT' >> $ICAL_FILE
-            echo "UID:sperrmuell-karlsruhe-${CALENDAR_EVENT_INDEX}@github.com/meyermarcel" >> $ICAL_FILE
-            echo "DTSTAMP:$(date +%Y%m%dT%H%M%SZ)" >> $ICAL_FILE
-            echo "SUMMARY:${STREET}" >> $ICAL_FILE
-            echo "LOCATION:${STREET}\\nKarlsruhe\\, Germany" >> $ICAL_FILE
-            echo "DTSTART;VALUE=DATE:${YEAR}${MONTH}${DAY}" >> $ICAL_FILE
-            echo "DTEND;VALUE=DATE:${YEAR}${MONTH}${DAY}" >> $ICAL_FILE
-            echo 'END:VEVENT' >> $ICAL_FILE
+  if [ -z $DATE ]; then
+    printf "\nKein Datum gefunden für ${STREET_NAMES[$i]}\n\n"
+  else
+    echo 'BEGIN:VEVENT' >> $ICAL_FILE
+    echo "UID:sperrmuell-karlsruhe-${STREET_IDS[$i]}@github.com/meyermarcel" >> $ICAL_FILE
+    echo "DTSTAMP:$(date +%Y%m%dT%H%M%SZ)" >> $ICAL_FILE
+    echo "SUMMARY:${STREET_NAMES[$i]}" >> $ICAL_FILE
+    echo "LOCATION:${STREET_NAMES[$i]}\\nKarlsruhe\\, Germany" >> $ICAL_FILE
+    echo "DTSTART;VALUE=DATE:$DATE" >> $ICAL_FILE
+    echo "DTEND;VALUE=DATE:$DATE" >> $ICAL_FILE
+    echo 'END:VEVENT' >> $ICAL_FILE
 
-            echo "(${i}/${COUNT}) in ${ICAL_FILE} gespeichert: ${DATE} ${STREET}"
-
-            CALENDAR_EVENT_INDEX=$[CALENDAR_EVENT_INDEX + 1]
-
-        fi
-    done
-
-    FIRST_LETTER=$SECOND_LETTER
+    echo "$(( 100 * $COUNTER / ${#STREET_IDS[@]} ))% ($COUNTER/${#STREET_IDS[@]}) in $ICAL_FILE gespeichert: $DATE ${STREET_NAMES[$i]}"
+  fi
+  COUNTER=$((COUNTER+1))
 done
 
 echo 'END:VCALENDAR' >> $ICAL_FILE
