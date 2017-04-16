@@ -2,7 +2,16 @@
 
 
 ICAL_FILE='sperrmuell-karlsruhe.ics'
-echo 'BEGIN:VCALENDAR' >> $ICAL_FILE
+
+if [ -f "$ICAL_FILE" ]; then
+  read -p "Die Datei $ICAL_FILE existiert bereits. Soll sie überschrieben werden? (j/N) " answer
+  case $answer in
+    [Jj]* ) ;;
+    * ) exit 1;;
+  esac
+fi
+
+echo 'BEGIN:VCALENDAR' > $ICAL_FILE
 echo 'VERSION:2.0' >> $ICAL_FILE
 echo 'PRODID:github.com/meyermarcel' >> $ICAL_FILE
 
